@@ -47,7 +47,7 @@ wsp log [<workspace>] [--oneline] [<args>]...   # Show commits ahead of upstream
 wsp sync [<workspace>] [--strategy <strategy>] [--dry-run] [--abort] [-y] # Fetch and rebase/merge all workspace repos
 wsp exec [<workspace>] <command>...             # Run a command in each repo of a workspace
 wsp cd <workspace>                              # Change directory into a workspace
-wsp rm [<workspace>] [-f] [-y]                  # Remove a workspace (alias: remove)
+wsp rm [<workspace>]... [-f] [-y]               # Remove one or more workspaces (alias: remove)
 wsp recover <workspace>                         # Restore a recently removed workspace
 wsp rename [old] <new>                          # Rename a workspace, its directory, and git branches
 wsp repo add [<repos>]... [-t <template>] [--no-discover] [--no-fetch] # Add repos to current workspace
@@ -394,7 +394,7 @@ wsp doctor [--fix]                              # Check workspace and global sta
 }
 ```
 
-### `Mutation commands (new, rm, add, remove, set, etc.)`
+### `Other mutation commands (new, recover, rename, repo add, config set, etc.)`
 <!-- type: MutationOutput -->
 ```json
 {
@@ -405,6 +405,26 @@ wsp doctor [--fix]                              # Check workspace and global sta
   "workspace": "my-feature",
   "path": "/home/user/dev/workspaces/my-feature",
   "branch": "my-feature"
+}
+```
+
+### `wsp rm <workspace>... --json`
+<!-- type: WorkspaceRemoveOutput -->
+```json
+{
+  "removals": [
+    {
+      "workspace": "my-feature",
+      "ok": true,
+      "message": "Workspace \"my-feature\" removed.",
+      "hint": "recoverable until 2026-01-08 — `wsp recover my-feature` restores it, `wsp ls --removed` lists all"
+    },
+    {
+      "workspace": "cleanup",
+      "ok": false,
+      "error": "workspace \"cleanup\" has unsaved work"
+    }
+  ]
 }
 ```
 

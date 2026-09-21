@@ -171,6 +171,73 @@ rm -f "$malformed/.wsp.yaml"
 rmdir "$malformed"
 "$WSP" rm "$victim" --force >/dev/null 2>&1
 
+# A quiet listing composes with `rm`: positional workspace names are processed
+# in order, letting a shell pass every listed workspace in one invocation.
+batchone="smoke-batch-one-$$"
+batchtwo="smoke-batch-two-$$"
+"$WSP" new "$batchone" --empty >/dev/null 2>&1
+"$WSP" new "$batchtwo" --empty >/dev/null 2>&1
+batch=$("$WSP" ls -q 2>/dev/null)
+if printf '%s\n' "$batch" | grep -Fx "$batchone" >/dev/null \
+    && printf '%s\n' "$batch" | grep -Fx "$batchtwo" >/dev/null \
+    && out=$("$WSP" rm --force --json -- $batch 2>/dev/null) \
+    && printf '%s\n' "$out" | grep -qF '"removals"' \
+    && [ "$(printf '%s\n' "$out" | grep -Fc '"ok": true')" -eq 2 ] \
+    && [ -z "$("$WSP" ls -q 2>/dev/null)" ]; then
+    ok "rm removes multiple workspaces from ls --quiet"
+else
+    bad "rm multiple workspace names failed"
+fi
+
+# A batch reports completed work and its first failure. The final workspace
+# must be untouched so users can fix the error and rerun it explicitly.
+failfirst="smoke-rm-first-$$"
+faillater="smoke-rm-later-$$"
+failmissing="smoke-rm-missing-$$"
+jsonerr="$sandbox/rm-batch-json.stderr"
+"$WSP" new "$failfirst" --empty >/dev/null 2>&1
+"$WSP" new "$faillater" --empty >/dev/null 2>&1
+if out=$("$WSP" rm "$failfirst" "$failmissing" "$faillater" --yes --json 2>"$jsonerr"); then
+    bad "rm batch unexpectedly succeeded after a missing workspace"
+else
+    remaining=$("$WSP" ls -q 2>/dev/null)
+    if printf '%s\n' "$out" | grep -qF '"removals"' \
+        && printf '%s\n' "$out" | grep -qF "\"workspace\": \"$failfirst\"" \
+        && printf '%s\n' "$out" | grep -qF "\"workspace\": \"$failmissing\"" \
+        && printf '%s\n' "$out" | grep -qF '"ok": false' \
+        && ! grep -qF "Failed to remove workspace \"$failmissing\"" "$jsonerr" \
+        && printf '%s\n' "$remaining" | grep -Fx "$faillater" >/dev/null \
+        && ! printf '%s\n' "$remaining" | grep -Fx "$failfirst" >/dev/null; then
+        ok "rm reports and stops at first batch failure"
+    else
+        bad "rm batch failure output or stopping point was wrong: $out"
+    fi
+fi
+
+# The failed batch intentionally leaves its later workspace behind; clean it
+# before the checks that assume an empty active listing.
+"$WSP" rm "$faillater" --force >/dev/null 2>&1
+
+# In text mode, completed removals remain pipeable while the failed removal is
+# diagnostic output. The process still reports failure after rendering both.
+textfirst="smoke-rm-text-first-$$"
+textlater="smoke-rm-text-later-$$"
+textmissing="smoke-rm-text-missing-$$"
+texterr="$sandbox/rm-batch.stderr"
+"$WSP" new "$textfirst" --empty >/dev/null 2>&1
+"$WSP" new "$textlater" --empty >/dev/null 2>&1
+if textout=$("$WSP" rm "$textfirst" "$textmissing" "$textlater" --yes 2>"$texterr"); then
+    bad "rm text batch unexpectedly succeeded after a missing workspace"
+elif printf '%s\n' "$textout" | grep -qF "Workspace \"$textfirst\" removed." \
+    && ! printf '%s\n' "$textout" | grep -qF "Failed to remove workspace \"$textmissing\"" \
+    && grep -qF "Failed to remove workspace \"$textmissing\"" "$texterr" \
+    && printf '%s\n' "$("$WSP" ls -q 2>/dev/null)" | grep -Fx "$textlater" >/dev/null; then
+    ok "rm text sends batch failures to stderr"
+else
+    bad "rm text batch did not separate output streams"
+fi
+"$WSP" rm "$textlater" --force >/dev/null 2>&1
+
 # --size measures disk usage. For a removed workspace the number comes from the
 # gc metadata, written when it was removed, so it costs a metadata read rather
 # than a walk. Asserted by removing the payload and checking the number holds.
