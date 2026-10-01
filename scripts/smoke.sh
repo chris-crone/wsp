@@ -214,6 +214,59 @@ else
     bad "rm multiple workspace names failed"
 fi
 
+# If an earlier batch item succeeds and the next needs confirmation, the
+# diagnostic must name that next item. A non-TTY caller must stop there.
+confirmfirst="smoke-rm-confirm-first-$$"
+confirmpartial="smoke-rm-confirm-partial-$$"
+confirmlater="smoke-rm-confirm-later-$$"
+"$WSP" new "$confirmfirst" --empty >/dev/null 2>&1
+mkdir "$workspaces/$confirmpartial"
+"$WSP" new "$confirmlater" --empty >/dev/null 2>&1
+confirmout="$sandbox/rm-confirm.stdout"
+confirmerr="$sandbox/rm-confirm.stderr"
+if "$WSP" rm "$confirmfirst" "$confirmpartial" "$confirmlater" </dev/null >"$confirmout" 2>"$confirmerr"; then
+    bad "rm batch unexpectedly confirmed a partial workspace without a TTY"
+elif grep -qF "pass --yes to confirm: wsp rm \"$confirmpartial\" --yes" "$confirmerr" \
+    && [ ! -d "$workspaces/$confirmfirst" ] \
+    && [ -d "$workspaces/$confirmpartial" ] \
+    && [ -d "$workspaces/$confirmlater" ]; then
+    ok "rm batch non-TTY error names current workspace"
+else
+    bad "rm batch non-TTY error or stop point was wrong: $(tr '\n' '|' <"$confirmerr")"
+fi
+"$WSP" rm "$confirmpartial" --yes >/dev/null 2>&1
+"$WSP" rm "$confirmlater" --force >/dev/null 2>&1
+
+# Give the batch a real terminal so the prompt itself is checked, not only the
+# non-TTY error. `script` has different command syntax on macOS and Linux.
+promptfirst="smoke-rm-prompt-first-$$"
+promptpartial="smoke-rm-prompt-partial-$$"
+promptlater="smoke-rm-prompt-later-$$"
+"$WSP" new "$promptfirst" --empty >/dev/null 2>&1
+mkdir "$workspaces/$promptpartial"
+"$WSP" new "$promptlater" --empty >/dev/null 2>&1
+if ! command -v script >/dev/null 2>&1; then
+    bad "rm interactive prompt test needs script"
+elif [ "$(uname -s)" = Darwin ]; then
+    promptoutput=$(printf 'n\n' | WSP="$WSP" PROMPT_FIRST="$promptfirst" PROMPT_PARTIAL="$promptpartial" PROMPT_LATER="$promptlater" \
+        script -q /dev/null /bin/sh -c 'exec "$WSP" rm "$PROMPT_FIRST" "$PROMPT_PARTIAL" "$PROMPT_LATER"' 2>&1)
+else
+    promptoutput=$(printf 'n\n' | WSP="$WSP" PROMPT_FIRST="$promptfirst" PROMPT_PARTIAL="$promptpartial" PROMPT_LATER="$promptlater" \
+        script -q -c 'exec "$WSP" rm "$PROMPT_FIRST" "$PROMPT_PARTIAL" "$PROMPT_LATER"' /dev/null 2>&1)
+fi
+if [ -n "${promptoutput:-}" ] \
+    && printf '%s' "$promptoutput" | grep -qF "Remove workspace \"$promptpartial\"? [y/N]:" \
+    && ! printf '%s' "$promptoutput" | grep -qF "Remove workspace \"$promptfirst\"? [y/N]:" \
+    && [ ! -d "$workspaces/$promptfirst" ] \
+    && [ -d "$workspaces/$promptpartial" ] \
+    && [ -d "$workspaces/$promptlater" ]; then
+    ok "rm interactive prompt names current workspace"
+else
+    bad "rm interactive prompt or decline was wrong: ${promptoutput:-<no output>}"
+fi
+"$WSP" rm "$promptpartial" --yes >/dev/null 2>&1
+"$WSP" rm "$promptlater" --force >/dev/null 2>&1
+
 # A batch reports completed work and its first failure. The final workspace
 # must be untouched so users can fix the error and rerun it explicitly.
 failfirst="smoke-rm-first-$$"

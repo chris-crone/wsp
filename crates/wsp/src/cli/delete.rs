@@ -111,13 +111,7 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
         if yes {
             // confirmed via --yes or --force
         } else if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-            eprint!("  Remove it? [y/N]: ");
-            std::io::stderr().flush()?;
-            let mut answer = String::new();
-            std::io::stdin().read_line(&mut answer)?;
-            if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-                anyhow::bail!("aborted");
-            }
+            confirm_removal(name, false)?;
         } else {
             anyhow::bail!("pass --yes to confirm: wsp rm {:?} --yes", name);
         }
@@ -186,9 +180,10 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
                         // before taking it. Counted in repos, not `inputs`,
                         // which holds up to two branch queries per repo.
                         eprintln!(
-                            "Fetching pull requests for {} repo{}...",
+                            "Fetching pull requests for {} repo{} in workspace {:?}...",
                             meta.repos.len(),
-                            if meta.repos.len() == 1 { "" } else { "s" }
+                            if meta.repos.len() == 1 { "" } else { "s" },
+                            name
                         );
                         let pr_results = crate::pr::fetch_parallel(&inputs);
                         let mut seen = std::collections::HashSet::new();
@@ -213,9 +208,10 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
         if !open_prs.is_empty() || has_pushed_unmerged {
             if !open_prs.is_empty() {
                 eprintln!(
-                    "Warning: {} open PR{} on this workspace:",
+                    "Warning: {} open PR{} on workspace {:?}:",
                     open_prs.len(),
-                    if open_prs.len() == 1 { "" } else { "s" }
+                    if open_prs.len() == 1 { "" } else { "s" },
+                    name
                 );
                 for (id, _branch, number, url) in &open_prs {
                     eprintln!("  #{} {} ({})", number, id, url);
@@ -253,7 +249,10 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
                     })
                     .collect();
                 if !uncovered.is_empty() {
-                    eprintln!("Warning: workspace has a pushed-but-unmerged branch:");
+                    eprintln!(
+                        "Warning: workspace {:?} has a pushed-but-unmerged branch:",
+                        name
+                    );
                     for msg in uncovered {
                         eprintln!("  - {}", msg);
                     }
@@ -262,16 +261,11 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
 
             if !yes {
                 if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                    eprint!("  Remove anyway? [y/N]: ");
-                    std::io::stderr().flush()?;
-                    let mut answer = String::new();
-                    std::io::stdin().read_line(&mut answer)?;
-                    if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
-                        anyhow::bail!("aborted");
-                    }
+                    confirm_removal(name, true)?;
                 } else {
                     anyhow::bail!(
-                        "workspace has open PRs or unmerged branch; pass --yes to confirm: wsp rm {:?} --yes",
+                        "workspace {:?} has open PRs or an unmerged branch; pass --yes to confirm: wsp rm {:?} --yes",
+                        name,
                         name
                     );
                 }
@@ -313,6 +307,18 @@ fn remove_one(name: &str, force: bool, yes: bool, paths: &Paths) -> Result<Mutat
         window, name
     );
     Ok(MutationOutput::new(format!("Workspace {:?} removed.", name)).with_hint(hint))
+}
+
+fn confirm_removal(name: &str, despite_warning: bool) -> Result<()> {
+    let qualifier = if despite_warning { " anyway" } else { "" };
+    eprint!("  Remove workspace {:?}{}? [y/N]: ", name, qualifier);
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if !matches!(answer.trim().to_lowercase().as_str(), "y" | "yes") {
+        anyhow::bail!("aborted");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

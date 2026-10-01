@@ -241,6 +241,31 @@ try {
     elseif ($remaining.Count -eq 0) { Ok "rm removes multiple explicitly named workspaces" }
     else { Bad "rm multiple workspace names left '$($remaining -join ', ')" }
 
+    # A batch may finish one workspace before the next needs confirmation.
+    # Non-interactive callers must get the current name and stop at that item.
+    $confirmfirst = "smoke-rm-confirm-first-$((Get-Date).ToString('HHmmss'))"
+    $confirmpartial = "smoke-rm-confirm-partial-$((Get-Date).ToString('HHmmss'))"
+    $confirmlater = "smoke-rm-confirm-later-$((Get-Date).ToString('HHmmss'))"
+    Wsp new $confirmfirst --empty | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $workspaces $confirmpartial) | Out-Null
+    Wsp new $confirmlater --empty | Out-Null
+    $confirmStdoutPath = Join-Path $sandbox "rm-confirm.stdout"
+    $confirmStderrPath = Join-Path $sandbox "rm-confirm.stderr"
+    '' | & $Wsp rm $confirmfirst $confirmpartial $confirmlater 1> $confirmStdoutPath 2> $confirmStderrPath
+    $confirmRc = $LASTEXITCODE
+    $confirmErr = Get-Content -Raw $confirmStderrPath
+    if ($confirmRc -eq 0) { Bad "rm batch unexpectedly confirmed a partial workspace without a TTY" }
+    elseif (-not $confirmErr.Contains('pass --yes to confirm: wsp rm "' + $confirmpartial + '" --yes')) {
+        Bad "rm batch non-TTY error did not name the current workspace: $confirmErr"
+    }
+    elseif ((Test-Path (Join-Path $workspaces $confirmfirst)) -or
+        -not (Test-Path (Join-Path $workspaces $confirmpartial)) -or
+        -not (Test-Path (Join-Path $workspaces $confirmlater))) {
+        Bad "rm batch non-TTY error did not stop at the current workspace"
+    } else { Ok "rm batch non-TTY error names current workspace" }
+    Wsp rm $confirmpartial --yes | Out-Null
+    Wsp rm $confirmlater --force | Out-Null
+
     # A batch reports completed work and its first failure. The final workspace
     # must be untouched so users can fix the error and rerun it explicitly.
     $failfirst = "smoke-rm-first-$((Get-Date).ToString('HHmmss'))"
