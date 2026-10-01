@@ -185,25 +185,61 @@ try {
     Remove-Item -Recurse -Force $malformed
     Wsp rm $victim --force | Out-Null
 
-    # A quiet listing composes with `rm`: positional workspace names are
-    # processed in order, letting a shell pass every listed workspace in one invocation.
+    # --size measures disk usage. For a removed workspace the number comes from
+    # the gc metadata, written when it was removed, so it costs a metadata read
+    # rather than a walk. Asserted by removing the payload and checking it holds.
+    $sizews = "smoke-du-$((Get-Date).ToString('HHmmss'))"
+    Wsp new $sizews --empty | Out-Null
+    # Anchored on the header row and case-sensitive (`-cmatch`): `-match` ignores
+    # case, so a workspace named "...size..." satisfied a bare search.
+    if (((Wsp ls --size) -join "`n") -cnotmatch '(?m)^NAME.*SIZE') { Bad "ls --size printed no SIZE column" }
+    else { Ok "ls --size adds a size column" }
+    if (((Wsp ls) -join "`n") -cmatch '(?m)^NAME.*SIZE') { Bad "ls without --size printed a SIZE column" }
+    else { Ok "ls without --size leaves the table alone" }
+
+    Wsp rm $sizews --force | Out-Null
+    # Read the row for this workspace by name, and empty only this entry:
+    # reaching across the whole gc directory would target another check's
+    # fixture the moment this block moves.
+    function Reported($name) {
+        (Wsp ls --removed --size) -split "`n" |
+            Where-Object { $_ -match "^$([regex]::Escape($name))\s" } |
+            ForEach-Object {
+                # The SIZE cell is the fourth and fifth whitespace-delimited
+                # columns. The later "0s ago" cell is a rendering of the
+                # current time and must not affect this metadata-persistence
+                # assertion.
+                $columns = $_ -split '\s+'
+                if ($columns.Count -ge 5) { "$($columns[3]) $($columns[4])" }
+            } |
+            Select-Object -First 1
+    }
+    $gcdir = Get-ChildItem -Path (Join-Path $env:XDG_DATA_HOME "wsp/gc") -Directory |
+        Where-Object { $_.Name -like "$sizews`__*" } | Select-Object -First 1
+    $before = Reported $sizews
+    Get-ChildItem -Path $gcdir.FullName -Recurse -File |
+        Where-Object { $_.Name -ne '.wsp-gc.yaml' } | Remove-Item -Force -ErrorAction SilentlyContinue
+    $after = Reported $sizews
+    if ($before -and $before -eq $after) {
+        Ok "ls --removed --size reads the size recorded at removal"
+    } else {
+        Bad "removed size changed when the files went ($before -> $after), so it was recomputed"
+    }
+    Remove-Item -Recurse -Force $gcdir.FullName -ErrorAction SilentlyContinue
+
+    # Explicit workspace names are processed in order in one invocation.
     $batchone = "smoke-batch-one-$((Get-Date).ToString('HHmmss'))"
     $batchtwo = "smoke-batch-two-$((Get-Date).ToString('HHmmss'))"
     Wsp new $batchone --empty | Out-Null
     Wsp new $batchtwo --empty | Out-Null
-    $batch = @(WorkspaceNames (Wsp ls -q))
-    if ($batch -notcontains $batchone -or $batch -notcontains $batchtwo) {
-        Bad "ls --quiet did not list both workspaces for rm"
-    } else {
-        $batchOut = (Wsp rm --force --json -- $batch) -join ([Environment]::NewLine)
-        $rmBatchRc = $global:LastRc
-        $remaining = @(WorkspaceNames (Wsp ls -q))
-        if ($rmBatchRc -ne 0) { Bad "rm multiple workspace names exited $rmBatchRc" }
-        elseif ($batchOut -notmatch '"removals"') { Bad "rm multiple workspace names did not return batch JSON" }
-        elseif ([regex]::Matches($batchOut, '"ok": true').Count -ne 2) { Bad "rm multiple workspace names did not report both successes" }
-        elseif ($remaining.Count -eq 0) { Ok "rm removes multiple workspaces from ls --quiet" }
-        else { Bad "rm multiple workspace names left '$($remaining -join ', ')" }
-    }
+    $batchOut = (Wsp rm --force --json -- $batchone $batchtwo) -join ([Environment]::NewLine)
+    $rmBatchRc = $global:LastRc
+    $remaining = @(WorkspaceNames (Wsp ls -q))
+    if ($rmBatchRc -ne 0) { Bad "rm multiple workspace names exited $rmBatchRc" }
+    elseif ($batchOut -notmatch '"removals"') { Bad "rm multiple workspace names did not return batch JSON" }
+    elseif ([regex]::Matches($batchOut, '"ok": true').Count -ne 2) { Bad "rm multiple workspace names did not report both successes" }
+    elseif ($remaining.Count -eq 0) { Ok "rm removes multiple explicitly named workspaces" }
+    else { Bad "rm multiple workspace names left '$($remaining -join ', ')" }
 
     # A batch reports completed work and its first failure. The final workspace
     # must be untouched so users can fix the error and rerun it explicitly.
@@ -254,48 +290,6 @@ try {
     elseif ($remaining -notcontains $textlater) { Bad "rm text batch did not stop at the first failure" }
     else { Ok "rm text sends batch failures to stderr" }
     Wsp rm $textlater --force | Out-Null
-
-    # --size measures disk usage. For a removed workspace the number comes from
-    # the gc metadata, written when it was removed, so it costs a metadata read
-    # rather than a walk. Asserted by removing the payload and checking it holds.
-    $sizews = "smoke-du-$((Get-Date).ToString('HHmmss'))"
-    Wsp new $sizews --empty | Out-Null
-    # Anchored on the header row and case-sensitive (`-cmatch`): `-match` ignores
-    # case, so a workspace named "...size..." satisfied a bare search.
-    if (((Wsp ls --size) -join "`n") -cnotmatch '(?m)^NAME.*SIZE') { Bad "ls --size printed no SIZE column" }
-    else { Ok "ls --size adds a size column" }
-    if (((Wsp ls) -join "`n") -cmatch '(?m)^NAME.*SIZE') { Bad "ls without --size printed a SIZE column" }
-    else { Ok "ls without --size leaves the table alone" }
-
-    Wsp rm $sizews --force | Out-Null
-    # Read the row for this workspace by name, and empty only this entry:
-    # reaching across the whole gc directory would target another check's
-    # fixture the moment this block moves.
-    function Reported($name) {
-        (Wsp ls --removed --size) -split "`n" |
-            Where-Object { $_ -match "^$([regex]::Escape($name))\s" } |
-            ForEach-Object {
-                # The SIZE cell is the fourth and fifth whitespace-delimited
-                # columns. The later "0s ago" cell is a rendering of the
-                # current time and must not affect this metadata-persistence
-                # assertion.
-                $columns = $_ -split '\s+'
-                if ($columns.Count -ge 5) { "$($columns[3]) $($columns[4])" }
-            } |
-            Select-Object -First 1
-    }
-    $gcdir = Get-ChildItem -Path (Join-Path $env:XDG_DATA_HOME "wsp/gc") -Directory |
-        Where-Object { $_.Name -like "$sizews`__*" } | Select-Object -First 1
-    $before = Reported $sizews
-    Get-ChildItem -Path $gcdir.FullName -Recurse -File |
-        Where-Object { $_.Name -ne '.wsp-gc.yaml' } | Remove-Item -Force -ErrorAction SilentlyContinue
-    $after = Reported $sizews
-    if ($before -and $before -eq $after) {
-        Ok "ls --removed --size reads the size recorded at removal"
-    } else {
-        Bad "removed size changed when the files went ($before -> $after), so it was recomputed"
-    }
-    Remove-Item -Recurse -Force $gcdir.FullName -ErrorAction SilentlyContinue
 
     # Non-interactive setup prints the manual guide instead of prompting, and
     # omits the branch-prefix line when one is already configured -- which the

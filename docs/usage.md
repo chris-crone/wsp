@@ -342,11 +342,9 @@ The footer on plain `wsp ls` names the workspace when it is within a day of
 expiring. With `gc.retention-days` set to `0`, nothing expires and the
 `EXPIRES` column reads `never`.
 
-Use `-q` or `--quiet` to print one workspace name per line for quick shell
-use, without requiring a JSON parser.
-
-Programmatic consumers should continue to use `--json` rather than parsing
-quiet text output.
+Use `-q` or `--quiet` to print one workspace name per line for direct shell
+composition. Programmatic consumers should continue to use `--json` rather
+than parsing quiet text output.
 
 ### `wsp st [workspace]`
 
