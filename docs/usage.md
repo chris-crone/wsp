@@ -342,13 +342,8 @@ The footer on plain `wsp ls` names the workspace when it is within a day of
 expiring. With `gc.retention-days` set to `0`, nothing expires and the
 `EXPIRES` column reads `never`.
 
-Use `-q` or `--quiet` to print one workspace name per line for direct shell
-composition. Put options before `--` when passing those names to another
-`wsp` command:
-
-```
-$ wsp rm --yes -- $(wsp ls -q)
-```
+Use `-q` or `--quiet` to print one workspace name per line for quick shell
+use, without requiring a JSON parser.
 
 Programmatic consumers should continue to use `--json` rather than parsing
 quiet text output.
@@ -416,6 +411,12 @@ Remove one or more workspaces. Each workspace is removed atomically in the
 order given. If one fails, completed removals stay removed and later names are
 not attempted. With no workspace name, detects the current workspace from the
 working directory.
+
+To remove explicitly selected workspaces:
+
+```
+$ wsp rm alpha beta
+```
 
 Removal blocks if any repo has uncommitted work or unmerged branches. It
 detects squash-merged branches automatically.
